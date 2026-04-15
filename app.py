@@ -4,67 +4,36 @@ from datetime import datetime
 import streamlit as st
 from openai import OpenAI
 
-st.set_page_config(page_title="MIS Final Project", page_icon="🧠", layout="centered")
-
-st.title("MIS Final Project")
-st.subheader("Thinking Coach MVP")
+st.set_page_config(page_title="MIS Final Project", page_icon="🧠", layout="wide")
 
 st.markdown(
     """
-This app is designed to increase **thinking effort**.
-
-Current flow:
-1. Choose your starting mode.
-2. If you're stuck, complete a quick engagement trigger.
-3. Get a reasoning challenge and revise your claim.
-"""
+<style>
+.block-container {padding-top: 1.2rem; max-width: 1000px;}
+.chat-note {background:#f6f8fa; border:1px solid #e6e8eb; border-radius:10px; padding:12px;}
+.metric-card {background:#fbfcfe; border:1px solid #e6e8eb; border-radius:10px; padding:10px;}
+</style>
+""",
+    unsafe_allow_html=True,
 )
+
+st.title("MIS Final Project")
+st.subheader("Professor-Mentor Thinking Coach")
 
 if "engagement_summary" not in st.session_state:
     st.session_state.engagement_summary = ""
-
 if "history" not in st.session_state:
     st.session_state.history = []
-
-mode = st.radio(
-    "Step 1: Where are you right now?",
-    options=["I have a draft claim", "I'm stuck and need help starting"],
-)
-
-if mode == "I'm stuck and need help starting":
-    st.markdown("### Engagement Trigger")
-    unclear = st.text_area("What is unclear?", height=80)
-    goal = st.text_area("What is the goal?", height=80)
-    tried = st.text_area("What have you tried?", height=80)
-
-    if st.button("Save my starting context"):
-        st.session_state.engagement_summary = (
-            f"What is unclear: {unclear.strip()}\n"
-            f"Goal: {goal.strip()}\n"
-            f"What was tried: {tried.strip()}"
-        )
-        st.success("Saved. Now write your draft claim below and run the sparring step.")
-
-round_count = len(st.session_state.history)
-if round_count >= 4:
-    suggested_level = "Low"
-elif round_count >= 2:
-    suggested_level = "Medium"
-else:
-    suggested_level = "High"
-
-st.caption(f"Suggested guidance level for this round: **{suggested_level}**")
-guidance_level = st.selectbox("Step 2: Guidance level", ["High", "Medium", "Low"], index=["High", "Medium", "Low"].index(suggested_level))
-
-st.caption("This tool challenges your reasoning and will not write your final submission for you.")
-
-user_claim = st.text_area(
-    "Step 3: Write your current claim, argument, or solution draft:",
-    height=180,
-    placeholder="Example: Schools should replace final exams with project-based assessments.",
-)
-
-run_clicked = st.button("Challenge my reasoning")
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = [
+        {
+            "role": "assistant",
+            "content": (
+                "Welcome. I will challenge and strengthen your reasoning like a structured professor-mentor. "
+                "I will not do your work for you. Start by sharing your current claim or draft."
+            ),
+        }
+    ]
 
 
 def looks_like_answer_request(text: str) -> bool:
@@ -83,143 +52,200 @@ def looks_like_answer_request(text: str) -> bool:
 def coaching_refusal_message() -> str:
     return (
         "I can’t write the final submission for you.\n\n"
-        "I can help you think it through instead:\n"
-        "1. What is your current position in one sentence?\n"
-        "2. What evidence supports it?\n"
-        "3. What is the strongest counterargument you need to answer?"
+        "I can mentor your thinking instead:\n"
+        "1. What is your current thesis in one sentence?\n"
+        "2. What is your best evidence?\n"
+        "3. What is the strongest objection you must answer?"
     )
 
 
-def format_sections_by_guidance(base_counter: str, base_weakness: str, questions: list[str], level: str) -> str:
+def format_structured_response(level: str, challenge: str, weakness: str, questions: list[str], next_action: str) -> str:
     if level == "High":
         return (
-            f"**Counterargument:** {base_counter}\n\n"
-            f"**Potential Weakness:** {base_weakness}\n\n"
-            "**Probing Questions:**\n"
-            + "\n".join(f"{idx + 1}. {q}" for idx, q in enumerate(questions[:3]))
+            f"### 1) Socratic Pushback\n{challenge}\n\n"
+            f"### 2) Method Weakness\n{weakness}\n\n"
+            "### 3) Probing Questions\n"
+            + "\n".join(f"- {q}" for q in questions[:3])
+            + f"\n\n### 4) Next Revision Action\n{next_action}"
         )
     if level == "Medium":
         return (
-            f"**Core Challenge:** {base_counter}\n\n"
-            f"**Main Weakness:** {base_weakness}\n\n"
-            "**Focus Questions:**\n"
-            + "\n".join(f"{idx + 1}. {q}" for idx, q in enumerate(questions[:2]))
+            f"### Core Pushback\n{challenge}\n\n"
+            f"### Key Weakness\n{weakness}\n\n"
+            "### Focus Questions\n"
+            + "\n".join(f"- {q}" for q in questions[:2])
+            + f"\n\n### Next Revision Action\n{next_action}"
         )
-    return f"**Single Challenge Question:** {questions[0]}"
+    return f"### Single High-Impact Question\n{questions[0]}\n\n### Next Revision Action\n{next_action}"
 
 
-def fallback_sparring_response(text: str, context_summary: str, level: str) -> str:
-    if looks_like_answer_request(text):
+def fallback_response(user_text: str, context_summary: str, level: str) -> str:
+    if looks_like_answer_request(user_text):
         return coaching_refusal_message()
 
-    counter = "Your claim may overgeneralize and ignore edge cases where the opposite approach works better."
-    weakness = "The reasoning does not yet include clear evidence, tradeoffs, or implementation constraints."
+    challenge = "Your current reasoning may overgeneralize and does not yet account for serious edge cases."
+    weakness = "The argument needs stronger evidence and a clearer treatment of tradeoffs and implementation limits."
     questions = [
-        "What is the strongest argument against your position?",
-        "Which assumptions in your argument could be false?",
-        "What evidence would convince a skeptic?",
+        "What is the strongest counterexample to your claim?",
+        "Which assumption, if false, would break your argument?",
+        "What evidence would convince a skeptical professor?",
     ]
+    next_action = "Rewrite your claim in 2–3 sentences including one tradeoff and one concrete piece of evidence."
 
-    response = format_sections_by_guidance(counter, weakness, questions, level)
-
+    response = format_structured_response(level, challenge, weakness, questions, next_action)
     if context_summary.strip() and level != "Low":
-        response += "\n\n**Context from your engagement trigger:**\n" + context_summary
-
+        response += f"\n\n---\n**Context considered:**\n{context_summary}"
     return response
 
 
-def openai_sparring_response(text: str, context_summary: str, level: str) -> str:
-    if looks_like_answer_request(text):
+def openai_response(user_text: str, context_summary: str, level: str, recent_messages: list[dict]) -> str:
+    if looks_like_answer_request(user_text):
         return coaching_refusal_message()
 
     api_key = os.getenv("OPENAI_API_KEY", "")
     if not api_key.strip():
-        return fallback_sparring_response(text, context_summary, level)
-
-    client = OpenAI(api_key=api_key)
-
-    context_block = (
-        f"\nEngagement trigger context:\n{context_summary}\n"
-        if context_summary
-        else ""
-    )
+        return fallback_response(user_text, context_summary, level)
 
     scaffolding = {
-        "High": "Use full structure with Counterargument, Potential Weakness, and exactly 3 Probing Questions.",
-        "Medium": "Use concise structure with Core Challenge, Main Weakness, and exactly 2 Focus Questions.",
-        "Low": "Use minimal structure: provide exactly one strong challenge question and no other sections.",
+        "High": "Return 4 markdown sections: 1) Socratic Pushback, 2) Method Weakness, 3) 3 Probing Questions, 4) Next Revision Action.",
+        "Medium": "Return 4 concise sections: Core Pushback, Key Weakness, 2 Focus Questions, Next Revision Action.",
+        "Low": "Return exactly 2 sections: Single High-Impact Question and Next Revision Action.",
     }[level]
 
+    transcript = "\n".join(f"{m['role']}: {m['content']}" for m in recent_messages[-6:])
+    context_block = f"Engagement trigger context:\n{context_summary}\n" if context_summary.strip() else ""
+
     prompt = f"""
-You are an Intellectual Sparring Partner.
-Your goal is to challenge thinking, not provide final answers.
-Never write the user's final submission, final essay, or completed assignment.
-If the user asks you to write the answer for them, refuse and provide coaching questions only.
+You are a high-level professor and mentor.
+Goal: strengthen the student's reasoning through structured critique.
+Do NOT write final submissions, final essays, or completed assignments.
+If the user asks for direct completion, refuse and switch to coaching questions.
 
-User claim:
-{text}
-{context_block}
 {scaffolding}
+Tone: clear, rigorous, encouraging.
 
-Keep it concise, clear, and academically respectful.
+Recent chat:
+{transcript}
+
+Current user message:
+{user_text}
+
+{context_block}
 """
 
+    client = OpenAI(api_key=api_key)
     response = client.responses.create(
         model="gpt-4.1-mini",
         input=prompt,
-        temperature=0.7,
+        temperature=0.6,
     )
-
     return response.output_text.strip()
 
 
-def show_progress_panel(current_claim: str) -> None:
-    st.markdown("### Progress")
-    rounds = len(st.session_state.history)
-
+def compute_metrics(text: str) -> tuple[bool, bool]:
+    lowered = text.lower()
     evidence_words = ["evidence", "data", "study", "source", "statistic", "research"]
     tradeoff_words = ["tradeoff", "cost", "constraint", "risk", "limitation", "feasible"]
-
-    current_text = current_claim.lower()
-    has_evidence = any(word in current_text for word in evidence_words)
-    has_tradeoff = any(word in current_text for word in tradeoff_words)
-
-    st.write(f"Revision rounds: **{rounds}**")
-    st.write(f"Evidence language detected: **{'Yes' if has_evidence else 'No'}**")
-    st.write(f"Tradeoff/constraint language detected: **{'Yes' if has_tradeoff else 'No'}**")
-
-    if rounds >= 2:
-        previous_claim = st.session_state.history[-2]["claim"]
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Previous claim**")
-            st.code(previous_claim)
-        with col2:
-            st.markdown("**Current claim**")
-            st.code(current_claim)
+    return any(w in lowered for w in evidence_words), any(w in lowered for w in tradeoff_words)
 
 
-if run_clicked:
-    if not user_claim.strip():
-        st.warning("Please enter a claim first.")
-    else:
-        with st.spinner("Generating challenge..."):
-            challenge = openai_sparring_response(
-                user_claim,
+with st.sidebar:
+    st.markdown("### Mentor Settings")
+
+    mode = st.radio(
+        "Where are you right now?",
+        options=["I have a draft claim", "I'm stuck and need help starting"],
+    )
+
+    rounds = len(st.session_state.history)
+    suggested = "Low" if rounds >= 4 else "Medium" if rounds >= 2 else "High"
+    st.caption(f"Suggested guidance level: **{suggested}**")
+    guidance_level = st.selectbox("Guidance level", ["High", "Medium", "Low"], index=["High", "Medium", "Low"].index(suggested))
+
+    if st.button("Reset chat session"):
+        st.session_state.history = []
+        st.session_state.engagement_summary = ""
+        st.session_state.chat_messages = [
+            {
+                "role": "assistant",
+                "content": (
+                    "Session reset. Share your current claim, and I will challenge your reasoning with structured guidance."
+                ),
+            }
+        ]
+        st.rerun()
+
+if mode == "I'm stuck and need help starting":
+    with st.expander("Engagement Trigger (start here if stuck)", expanded=True):
+        unclear = st.text_area("What is unclear?", height=70)
+        goal = st.text_area("What is the goal?", height=70)
+        tried = st.text_area("What have you tried?", height=70)
+        if st.button("Save starting context"):
+            st.session_state.engagement_summary = (
+                f"What is unclear: {unclear.strip()}\n"
+                f"Goal: {goal.strip()}\n"
+                f"What was tried: {tried.strip()}"
+            )
+            st.success("Saved. Continue in the chat below.")
+
+st.markdown('<div class="chat-note">This coach is designed to enhance your thinking, not replace your work.</div>', unsafe_allow_html=True)
+
+for message in st.session_state.chat_messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+user_input = st.chat_input("Share your current reasoning, draft, or question...")
+
+if user_input:
+    st.session_state.chat_messages.append({"role": "user", "content": user_input})
+
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Analyzing your reasoning..."):
+            mentor_reply = openai_response(
+                user_input,
                 st.session_state.engagement_summary.strip(),
                 guidance_level,
+                st.session_state.chat_messages,
             )
+        st.markdown(mentor_reply)
 
-        st.session_state.history.append(
-            {
-                "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
-                "claim": user_claim,
-                "response": challenge,
-                "guidance_level": guidance_level,
-            }
-        )
+    st.session_state.chat_messages.append({"role": "assistant", "content": mentor_reply})
+    has_evidence, has_tradeoffs = compute_metrics(user_input)
+    st.session_state.history.append(
+        {
+            "timestamp": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "claim": user_input,
+            "response": mentor_reply,
+            "guidance_level": guidance_level,
+            "evidence_detected": has_evidence,
+            "tradeoffs_detected": has_tradeoffs,
+        }
+    )
 
-        st.markdown("### Sparring Output")
-        st.markdown(challenge)
-        show_progress_panel(user_claim)
-        st.info("Next step: Revise your claim using the challenge above, then run it again.")
+if st.session_state.history:
+    latest = st.session_state.history[-1]
+    st.markdown("### Progress Snapshot")
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f'<div class="metric-card">Rounds<br><b>{len(st.session_state.history)}</b></div>', unsafe_allow_html=True)
+    c2.markdown(
+        f'<div class="metric-card">Evidence language<br><b>{"Yes" if latest["evidence_detected"] else "No"}</b></div>',
+        unsafe_allow_html=True,
+    )
+    c3.markdown(
+        f'<div class="metric-card">Tradeoff language<br><b>{"Yes" if latest["tradeoffs_detected"] else "No"}</b></div>',
+        unsafe_allow_html=True,
+    )
+
+    if len(st.session_state.history) >= 2:
+        previous = st.session_state.history[-2]["claim"]
+        current = st.session_state.history[-1]["claim"]
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown("**Previous input**")
+            st.code(previous)
+        with col2:
+            st.markdown("**Current input**")
+            st.code(current)

@@ -4,12 +4,12 @@ This repository contains a Streamlit MVP for an AI-powered learning system that 
 
 ## Current MVP Scope
 
-- Working Streamlit interface
+- Chat-style interface with a structured professor-mentor tone
 - Engagement Trigger pre-step for stuck learners
 - One functioning agent: **Intellectual Sparring Partner**
-- Thinking-focused interaction (counterargument, weakness, probing questions)
+- Thinking-focused interaction (pushback, weakness diagnosis, probing questions, next action)
 - Guidance fade levels (High, Medium, Low)
-- Progress panel with revision history and simple reasoning heuristics
+- Progress snapshot with revision history and simple reasoning heuristics
 - Anti-answer guardrails (the app refuses to write final submissions)
 - Streamlit first-run onboarding bypass via local `.streamlit/credentials.toml`
 
